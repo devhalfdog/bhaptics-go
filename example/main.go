@@ -1,8 +1,19 @@
 package main
 
-import bhapticsgo "github.com/devhalfdog/bhaptics-go"
+import (
+	"fmt"
+
+	bhapticsgo "github.com/devhalfdog/bhaptics-go"
+)
 
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			// Handle panic here
+			fmt.Println("Recovered in main:", r)
+		}
+	}()
+
 	manager := bhapticsgo.NewBHapticsManager(bhapticsgo.Option{
 		AppKey:    "string",
 		AppName:   "aaa",
