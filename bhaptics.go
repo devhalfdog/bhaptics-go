@@ -174,7 +174,7 @@ func (m *BHapticsManager) Run() error {
 	go m.reader()
 	go m.parser()
 	go m.writer()
-	go m.send()
+	go m.eventSend()
 
 	return nil
 }
@@ -245,15 +245,13 @@ func (m *BHapticsManager) disconnect() error {
 	err := m.connection.socket.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseMessage, ""))
 	if err != nil {
 		m.debug("[disconnect] Failed to close WebSocket connection: ", err)
-
-		return err
 	}
 
-	return nil
+	return err
 }
 
 // reader 메서드는 bHaptics API로부터 WebSocket로 받은
-// 데이터를 채널에 전송한다
+// 데이터를 읽기 채널에 전달한다
 func (m *BHapticsManager) reader() {
 	// defer가 실행되면 for문이 종료된거라 그것은 에러
 	defer func() {
@@ -277,6 +275,8 @@ func (m *BHapticsManager) reader() {
 	}
 }
 
+// parser 메서드는 읽기 채널에 데이터가 있을 때
+// 해당하는 데이터를 구조체로 변경한다
 func (m *BHapticsManager) parser() {
 	defer func() {
 		m.debug("[parser] parser goroutine exited")
@@ -284,6 +284,7 @@ func (m *BHapticsManager) parser() {
 	}()
 
 	for message := range m.connection.read {
+		//! TODO: error handling
 		if strings.Split(string(message), " ")[0] == "error" {
 			m.debug("[parser] error message from BHaptics API: ", string(message))
 			continue
@@ -302,6 +303,8 @@ func (m *BHapticsManager) parser() {
 	}
 }
 
+// writer 메서드는 쓰기 채널에 데이터가 있을 때
+// 데이터를 WebSocket으로 전송한다
 func (m *BHapticsManager) writer() {
 	defer func() {
 		m.debug("[writer] writer goroutine exited")
@@ -317,6 +320,7 @@ func (m *BHapticsManager) writer() {
 	}
 }
 
+// eventAdd 메서드는 Queue에 이벤트를 추가한다
 func (m *BHapticsManager) eventAdd(event []eventRequest) error {
 	m.Lock()
 	defer m.Unlock()
@@ -345,7 +349,14 @@ func (m *BHapticsManager) eventAdd(event []eventRequest) error {
 	return nil
 }
 
-func (m *BHapticsManager) send() error {
+// eventSend 메서드는 계속 대기하면서 Queue에 이벤트가 있을 때
+// 쓰기 채널에 이벤트 데이터를 전달한다
+func (m *BHapticsManager) eventSend() error {
+	defer func() {
+		m.debug("[send] eventSend goroutine exited")
+		m.disconnect()
+	}()
+
 	for {
 		if m.connection.socket == nil || !m.IsConnected {
 			m.debug("[send] websocket is not connected")
@@ -353,13 +364,17 @@ func (m *BHapticsManager) send() error {
 		}
 
 		playing, err := m.IsPlayingAny()
+		// 플레이 중이지 않으며 에러가 없을 때
+		// Queue에 이벤트가 있으면 쓰기 채널에 이벤트를 전달
 		if !playing && err == nil {
 			if m.eventQueue.GetLen() > 0 {
-				m.debug("[send] send event")
+				// Queue에 있는 이벤트를 가져온다
+				m.debug("[send] event dequeued")
 				item, err := m.eventQueue.Dequeue()
 				if err != nil {
 					m.debug("[send] failed to dequeue event request: ", err)
 				} else {
+					m.debug("[send] send event")
 					m.connection.write <- item.([]byte)
 				}
 			}
@@ -371,16 +386,40 @@ func (m *BHapticsManager) send() error {
 	}
 }
 
-func (m *BHapticsManager) GetConnectedDeviceCount() int {
+// GetConnectedDeviceCount 메서드는
+// bHaptics API로부터 받은 connectedDeviceCount를 반환한다
+func (m *BHapticsManager) GetConnectedDeviceCount() (int, error) {
 	m.Lock()
 	defer m.Unlock()
 
-	return m.connection.lastResponse.ConnectedDeviceCount
+	if m.connection == nil || !m.IsConnected {
+		m.debug("[GetConnectedDeviceCount] websocket is not connected")
+		return -1, errors.New("websocket is not connected")
+	}
+
+	if !m.connection.lastResponse.isReady {
+		m.debug("[GetConnectedDeviceCount] response is not ready")
+		return -1, errors.New("response is not ready")
+	}
+
+	return m.connection.lastResponse.ConnectedDeviceCount, nil
 }
 
-func (m *BHapticsManager) IsDeviceConnected(position bHapticsPosition) bool {
+// IsDeviceConnected 메서드는 bHaptics API로부터
+// position에 해당하는 장치가 연결되어 있는지 여부를 반환한다
+func (m *BHapticsManager) IsDeviceConnected(position bHapticsPosition) (bool, error) {
 	m.Lock()
 	defer m.Unlock()
+
+	if m.connection == nil || !m.IsConnected {
+		m.debug("[IsDeviceConnected] websocket is not connected")
+		return false, errors.New("websocket is not connected")
+	}
+
+	if !m.connection.lastResponse.isReady {
+		m.debug("[IsDeviceConnected] response is not ready")
+		return false, errors.New("response is not ready")
+	}
 
 	if position == VestFrontPosition || position == VestBackPosition {
 		position = VestPosition
@@ -388,14 +427,16 @@ func (m *BHapticsManager) IsDeviceConnected(position bHapticsPosition) bool {
 
 	for _, p := range m.connection.lastResponse.ConnectedPositions {
 		if p == position {
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
 
-// TODO
+// GetDeviceStatus 메서드는 position에 해당하는 장치의
+// 각 모터에 대한 현재 intensity 값을
+// 포함한 정수 배열을 가져온다
 func (m *BHapticsManager) GetDeviceStatus(position bHapticsPosition) ([]int, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -411,14 +452,80 @@ func (m *BHapticsManager) GetDeviceStatus(position bHapticsPosition) ([]int, err
 		return nil, errors.New("status map is nil")
 	}
 
-	// TODO
 	if position == VestPosition {
-		return nil, nil
+		frontStatusRaw, frontExists := statusMap[string(VestFrontPosition)]
+		backStatusRaw, backExists := statusMap[string(VestBackPosition)]
+
+		if !frontExists || !backExists {
+			m.debug("[GetDeviceStatus] front or back status not found")
+			return nil, errors.New("front or back status not found")
+		}
+		m.debug("[GetDeviceStatus] frontStatusRaw Value: ", frontStatusRaw)
+		m.debug("[GetDeviceStatus] backStatusRaw Value: ", backStatusRaw)
+
+		frontStatus, ok := frontStatusRaw.([]interface{})
+		if !ok {
+			m.debug("[GetDeviceStatus] failed to convert front status to []interface{}")
+			return nil, errors.New("failed to convert front status to []interface{}")
+		}
+
+		backStatus, ok := backStatusRaw.([]interface{})
+		if !ok {
+			m.debug("[GetDeviceStatus] failed to convert back status to []interface{}")
+			return nil, errors.New("failed to convert back status to []interface{}")
+		}
+
+		totalCount := len(frontStatus) + len(backStatus)
+		val := make([]int, totalCount)
+		for i := 0; i < totalCount; i++ {
+			if i < len(frontStatus) {
+				v, ok := frontStatus[i].(float64)
+				if !ok {
+					m.debug("[GetDeviceStatus] failed to convert front status value to int")
+					return nil, errors.New("failed to convert front status value to int")
+				}
+				val[i] = int(v)
+			} else {
+				v, ok := backStatus[i-len(frontStatus)].(float64)
+				if !ok {
+					m.debug("[GetDeviceStatus] failed to convert back status value to int")
+					return nil, errors.New("failed to convert back status value to int")
+				}
+				val[i] = int(v)
+			}
+		}
+
+		return val, nil
 	}
 
-	return nil, nil
+	statusRaw, exists := statusMap[string(position)]
+	if !exists {
+		m.debug("[GetDeviceStatus] device status not found")
+		return nil, errors.New("device status not found")
+	}
+	m.debug("[GetDeviceStatus] statusRaw Value: ", statusRaw)
+
+	status, ok := statusRaw.([]interface{})
+	if !ok {
+		m.debug("[GetDeviceStatus] failed to convert device status to []interface{}")
+		return nil, errors.New("failed to convert device status to []interface{}")
+	}
+
+	val := make([]int, len(status))
+	for i := 0; i < len(status); i++ {
+		v, ok := status[i].(float64)
+		if !ok {
+			m.debug("[GetDeviceStatus] failed to convert device status value to int")
+			return nil, errors.New("failed to convert device status value to int")
+		}
+		val[i] = int(v)
+	}
+
+	return val, nil
 }
 
+// IsPlaying 메서드는 key에 해당하는 이벤트가
+// 이미 실행중인지 여부를 반환한다
 func (m *BHapticsManager) IsPlaying(key string) (bool, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -443,6 +550,7 @@ func (m *BHapticsManager) IsPlaying(key string) (bool, error) {
 	return false, errors.New("key not found")
 }
 
+// IsPlayingAny 메서드는 이벤트가 이미 실행중인지 여부를 반환한다
 func (m *BHapticsManager) IsPlayingAny() (bool, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -460,7 +568,7 @@ func (m *BHapticsManager) IsPlayingAny() (bool, error) {
 	return len(m.connection.lastResponse.ActiveKeys) > 0, nil
 }
 
-// ! TODO
+// StopPlaying 메서드는 key에 해당하는 이벤트를 중지시킨다
 func (m *BHapticsManager) StopPlaying(key string) error {
 	m.Lock()
 	defer m.Unlock()
@@ -470,8 +578,13 @@ func (m *BHapticsManager) StopPlaying(key string) error {
 		return errors.New("websocket is not connected")
 	}
 
-	// TODO - request
-	err := m.eventQueue.Enqueue("turnOff")
+	events := []eventRequest{
+		{
+			Key:  key,
+			Type: "turnOff",
+		},
+	}
+	err := m.eventAdd(events)
 	if err != nil {
 		m.debug("[StopPlaying] failed to enqueue event: ", err)
 		return err
@@ -480,7 +593,8 @@ func (m *BHapticsManager) StopPlaying(key string) error {
 	return nil
 }
 
-// ! TODO
+// StopPlayingAll 메서드는 모든 이벤트를 중지시킨다
+// TODO: 즉시 중지시킬지, Queue에 넣어서 순차적으로 처리할지 고민을 좀 해봐야함.
 func (m *BHapticsManager) StopPlayingAny() error {
 	m.Lock()
 	defer m.Unlock()
@@ -490,8 +604,12 @@ func (m *BHapticsManager) StopPlayingAny() error {
 		return errors.New("websocket is not connected")
 	}
 
-	// TODO - request
-	err := m.eventQueue.Enqueue("turnOffAll")
+	events := []eventRequest{
+		{
+			Type: "turnOffAll",
+		},
+	}
+	err := m.eventAdd(events)
 	if err != nil {
 		m.debug("[StopPlayingAny] failed to enqueue event: ", err)
 		return err
@@ -500,6 +618,8 @@ func (m *BHapticsManager) StopPlayingAny() error {
 	return nil
 }
 
+// IsPatternRegistered 메서드는 key에 해당하는 패턴이
+// 이미 등록이 되어있는지 여부를 반환한다
 func (m *BHapticsManager) IsPatternRegistered(key string) (bool, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -524,8 +644,10 @@ func (m *BHapticsManager) IsPatternRegistered(key string) (bool, error) {
 	return false, errors.New("[IsPatternRegistered] key not found")
 }
 
+// TODO
 func (m *BHapticsManager) Play(key string, durationMillis int, position bHapticsPosition) {}
 
+// debug 메서드는 debugMode가 true일 때, message를 로그로 출력한다
 func (m *BHapticsManager) debug(message ...any) {
 	if m.debugMode {
 		log.Println(message...)
