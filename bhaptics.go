@@ -13,111 +13,13 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/enriquebris/goconcurrentqueue"
 	"github.com/gorilla/websocket"
 )
-
-const (
-	endpoint       = "v2/feedbacks%s"
-	bHapticsApiUrl = "ws://%s:%d/%s"
-)
-
-// BHaptics Positions
-const (
-	VestPosition      bHapticsPosition = "Vest"
-	VestFrontPosition bHapticsPosition = "VestFront"
-	VestBackPosition  bHapticsPosition = "VestBack"
-	ForearmLPosition  bHapticsPosition = "ForearmL"
-	ForearmRPosition  bHapticsPosition = "ForearmR"
-)
-
-// BHaptics Status
-const (
-	Disconnected bHapticsStatus = 0
-	Connecting   bHapticsStatus = 1
-	Connected    bHapticsStatus = 2
-)
-
-type bHapticsPosition string
-type bHapticsStatus int
-
-type BHapticsManager struct {
-	sync.Mutex
-
-	IsConnected bool
-
-	connection    *bHapticsConnection
-	registerCache []int                   // TODO - []Register
-	eventQueue    *goconcurrentqueue.FIFO // 요청 큐
-	registerQueue *goconcurrentqueue.FIFO
-	appKey        string
-	appName       string
-	debugMode     bool
-}
-
-type bHapticsConnection struct {
-	ipAddress string
-	port      int
-
-	socket       *websocket.Conn
-	timeout      int
-	write        chan []byte
-	read         chan []byte
-	lastResponse playerResponse
-}
-
-type Option struct {
-	// BHaptics App Key
-	AppKey string
-	// BHaptics App Name
-	AppName string
-	// BHaptics Remote IP Address
-	IPAddress string
-	// BHaptics Remote Port
-	Port int
-	// BHaptics Connection Timeout (in seconds)
-	Timeout int
-	// Debug Mode
-	DebugMode bool
-}
-
-type playerResponse struct {
-	isReady bool
-
-	ConnectedDeviceCount int                    `json:"connectedDeviceCount,omitempty"`
-	ActiveKeys           []string               `json:"activeKeys,omitempty"`
-	ConnectedPositions   []bHapticsPosition     `json:"connectedPositions,omitempty"`
-	RegisteredKeys       []string               `json:"registeredKeys,omitempty"`
-	Status               map[string]interface{} `json:"status,omitempty"`
-}
-
-type request struct {
-	Submit []eventRequest `json:"submit"`
-}
-
-type eventRequest struct {
-	Key   string       `json:"key"`
-	Type  string       `json:"type"`
-	Frame framePayload `json:"frame"`
-}
-
-type framePayload struct {
-	Position       bHapticsPosition `json:"position"`
-	DotPoints      []HapticPoint    `json:"dotPoints,omitempty"`
-	PathPoints     []HapticPoint    `json:"pathPoints,omitempty"`
-	DurationMillis int              `json:"durationMillis"`
-}
-
-type HapticPoint struct {
-	Index     int         `json:"index,omitempty"`
-	X         float64     `json:"x,omitempty"`
-	Y         float64     `json:"y,omitempty"`
-	Intensity interface{} `json:"intensity,omitempty"`
-}
 
 // NewBHapticsManager 함수는 새로운 BHapticsManager 인스턴스를 반환한다
 func NewBHapticsManager(opt ...Option) *BHapticsManager {
@@ -131,6 +33,7 @@ func NewBHapticsManager(opt ...Option) *BHapticsManager {
 			read:      make(chan []byte, 1024),
 		},
 		eventQueue:  goconcurrentqueue.NewFIFO(),
+		eventCache:  make(map[string][]event),
 		IsConnected: false,
 		appKey:      "",
 		appName:     "",
@@ -160,7 +63,6 @@ func NewBHapticsManager(opt ...Option) *BHapticsManager {
 
 // Run 메서드는 bHaptics API와 연결을 시작하고
 // 데이터를 처리하기 위한 goroutine을 시작한다
-// 연결에 실패할 경우 에러를 반환한다
 func (m *BHapticsManager) Run() error {
 	m.Lock()
 	defer m.Unlock()
@@ -180,7 +82,6 @@ func (m *BHapticsManager) Run() error {
 }
 
 // connect 메서드는 bHaptics API와 WebSocket 연결을 시도한다
-// 연결에 실패할 경우 에러를 반환한다
 func (m *BHapticsManager) connect() error {
 	if m.IsConnected || m.connection.socket != nil {
 		m.debug("[connect] Already connected")
@@ -226,7 +127,6 @@ func (m *BHapticsManager) connect() error {
 
 // disconnect 메서드는 bHaptics API와 연결된
 // WebSocket 연결을 종료한다
-// 연결 종료에 실패할 경우 에러를 반환한다
 func (m *BHapticsManager) disconnect() error {
 	m.Lock()
 	defer m.Unlock()
@@ -320,17 +220,14 @@ func (m *BHapticsManager) writer() {
 	}
 }
 
-// eventAdd 메서드는 Queue에 이벤트를 추가한다
-func (m *BHapticsManager) eventAdd(event []eventRequest) error {
-	m.Lock()
-	defer m.Unlock()
-
+// eventRequestsAdd 메서드는 Queue에 이벤트를 추가한다
+func (m *BHapticsManager) eventRequestsAdd(event []event) error {
 	if m.connection.socket == nil || !m.IsConnected {
 		m.debug("[eventAdd] websocket is not connected")
 		return fmt.Errorf("websocket is not connected")
 	}
 
-	req := request{
+	req := eventRequest{
 		Submit: event,
 	}
 
@@ -343,6 +240,40 @@ func (m *BHapticsManager) eventAdd(event []eventRequest) error {
 	err = m.eventQueue.Enqueue(msg)
 	if err != nil {
 		m.debug("[send] failed to enqueue event request: ", err)
+		return err
+	}
+
+	return nil
+}
+
+// eventKeyAdd 메서드는 Queue에 이벤트를 추가한다
+func (m *BHapticsManager) eventKeyAdd(key string, altKey ...string) error {
+	if m.connection.socket == nil || !m.IsConnected {
+		m.debug("[eventKeyAdd] websocket is not connected")
+		return fmt.Errorf("websocket is not connected")
+	}
+
+	evtReq := event{
+		Key:  key,
+		Type: "key",
+	}
+	if len(altKey) > 0 {
+		evtReq.AltKey = altKey[0]
+	}
+
+	req := eventRequest{
+		Submit: []event{evtReq},
+	}
+
+	msg, err := json.Marshal(req)
+	if err != nil {
+		m.debug("[send] failed to marshal JSON: ", err)
+		return err
+	}
+
+	err = m.eventQueue.Enqueue(msg)
+	if err != nil {
+		m.debug("[send] failed to enqueue event key request: ", err)
 		return err
 	}
 
@@ -578,13 +509,13 @@ func (m *BHapticsManager) StopPlaying(key string) error {
 		return errors.New("websocket is not connected")
 	}
 
-	events := []eventRequest{
+	events := []event{
 		{
 			Key:  key,
 			Type: "turnOff",
 		},
 	}
-	err := m.eventAdd(events)
+	err := m.eventRequestsAdd(events)
 	if err != nil {
 		m.debug("[StopPlaying] failed to enqueue event: ", err)
 		return err
@@ -604,12 +535,12 @@ func (m *BHapticsManager) StopPlayingAny() error {
 		return errors.New("websocket is not connected")
 	}
 
-	events := []eventRequest{
+	events := []event{
 		{
 			Type: "turnOffAll",
 		},
 	}
-	err := m.eventAdd(events)
+	err := m.eventRequestsAdd(events)
 	if err != nil {
 		m.debug("[StopPlayingAny] failed to enqueue event: ", err)
 		return err
@@ -645,7 +576,73 @@ func (m *BHapticsManager) IsPatternRegistered(key string) (bool, error) {
 }
 
 // TODO
-func (m *BHapticsManager) Play(key string, durationMillis int, position bHapticsPosition) {}
+func (m *BHapticsManager) PlayDot(key string, durationMillis int, dotPoints []HapticPoint, position bHapticsPosition) {
+}
+
+func (m *BHapticsManager) PlayPattern(key string, altKey ...string) error {
+	if key == "" {
+		m.debug("[PlayPattern] key is empty")
+		return errors.New("key is empty")
+	}
+
+	if m.eventCache[key] == nil {
+		m.debug("[PlayPattern] pattern not found in cache")
+		return errors.New("pattern not found in cache")
+	}
+
+	err := m.eventKeyAdd(key, altKey...)
+	if err != nil {
+		m.debug("[PlayPattern] failed to enqueue event key: ", err)
+		return err
+	}
+
+	return nil
+}
+
+func (m *BHapticsManager) RegisterPatternFromFile(key, tactFilePath string) error {
+	if key == "" {
+		m.debug("[RegisterPatternFromFile] key is empty")
+		return errors.New("key is empty")
+	}
+
+	if tactFilePath == "" {
+		m.debug("[RegisterPatternFromFile] tact fail path is empty")
+		return errors.New("tact fail path is empty")
+	}
+
+	f, err := os.ReadFile(tactFilePath)
+	if err != nil {
+		m.debug("[RegisterPatternFromFile] failed to read tact file: ", err)
+		return err
+	}
+
+	var tact register
+	err = json.Unmarshal(f, &tact)
+	if err != nil {
+		m.debug("[RegisterPatternFromFile] failed to unmarshal tact file: ", err)
+		return err
+	}
+
+	// TODO - queue 등록 및 캐싱
+
+	return nil
+}
+
+func (m *BHapticsManager) cachingPattern(key string, events []event) error {
+	if key == "" {
+		m.debug("[cachingPattern] key is empty")
+		return errors.New("key is empty")
+	}
+
+	if events == nil || len(events) == 0 {
+		m.debug("[cachingPattern] events is empty")
+		return errors.New("events is empty")
+	}
+
+	m.eventCache[key] = events
+
+	return nil
+}
 
 // debug 메서드는 debugMode가 true일 때, message를 로그로 출력한다
 func (m *BHapticsManager) debug(message ...any) {
