@@ -8,7 +8,6 @@
 package bhapticsgo
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -17,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/enriquebris/goconcurrentqueue"
 	"github.com/gorilla/websocket"
 )
@@ -77,6 +77,7 @@ func (m *BHapticsManager) Run() error {
 	go m.parser()
 	go m.writer()
 	go m.eventSend()
+	go m.registerSend()
 
 	return nil
 }
@@ -191,7 +192,7 @@ func (m *BHapticsManager) parser() {
 		}
 
 		var response playerResponse
-		err := json.Unmarshal(message, &response)
+		err := sonic.Unmarshal(message, &response)
 		if err != nil {
 			m.debug("[parser] failed to parse JSON: ", err)
 			continue
@@ -222,6 +223,9 @@ func (m *BHapticsManager) writer() {
 
 // eventRequestsAdd 메서드는 Queue에 이벤트를 추가한다
 func (m *BHapticsManager) eventRequestsAdd(event []event) error {
+	m.Lock()
+	defer m.Unlock()
+
 	if m.connection.socket == nil || !m.IsConnected {
 		m.debug("[eventAdd] websocket is not connected")
 		return fmt.Errorf("websocket is not connected")
@@ -231,7 +235,7 @@ func (m *BHapticsManager) eventRequestsAdd(event []event) error {
 		Submit: event,
 	}
 
-	msg, err := json.Marshal(req)
+	msg, err := sonic.Marshal(req)
 	if err != nil {
 		m.debug("[send] failed to marshal JSON: ", err)
 		return err
@@ -248,6 +252,9 @@ func (m *BHapticsManager) eventRequestsAdd(event []event) error {
 
 // eventKeyAdd 메서드는 Queue에 이벤트를 추가한다
 func (m *BHapticsManager) eventKeyAdd(key string, altKey ...string) error {
+	m.Lock()
+	defer m.Unlock()
+
 	if m.connection.socket == nil || !m.IsConnected {
 		m.debug("[eventKeyAdd] websocket is not connected")
 		return fmt.Errorf("websocket is not connected")
@@ -265,7 +272,7 @@ func (m *BHapticsManager) eventKeyAdd(key string, altKey ...string) error {
 		Submit: []event{evtReq},
 	}
 
-	msg, err := json.Marshal(req)
+	msg, err := sonic.Marshal(req)
 	if err != nil {
 		m.debug("[send] failed to marshal JSON: ", err)
 		return err
@@ -289,10 +296,9 @@ func (m *BHapticsManager) eventSend() error {
 	}()
 
 	for {
-		if m.connection.socket == nil || !m.IsConnected {
-			m.debug("[send] websocket is not connected")
-			return fmt.Errorf("websocket is not connected")
-		}
+		// 여기서 connection을 체크하지 않는 이유는
+		// 반복문을 유지하기 위함.
+		// 어차피 이 전 함수에서 다 체크하므로
 
 		playing, err := m.IsPlayingAny()
 		// 플레이 중이지 않으며 에러가 없을 때
@@ -501,9 +507,6 @@ func (m *BHapticsManager) IsPlayingAny() (bool, error) {
 
 // StopPlaying 메서드는 key에 해당하는 이벤트를 중지시킨다
 func (m *BHapticsManager) StopPlaying(key string) error {
-	m.Lock()
-	defer m.Unlock()
-
 	if m.connection == nil || !m.IsConnected {
 		m.debug("[StopPlaying] websocket is not connected")
 		return errors.New("websocket is not connected")
@@ -527,9 +530,6 @@ func (m *BHapticsManager) StopPlaying(key string) error {
 // StopPlayingAll 메서드는 모든 이벤트를 중지시킨다
 // TODO: 즉시 중지시킬지, Queue에 넣어서 순차적으로 처리할지 고민을 좀 해봐야함.
 func (m *BHapticsManager) StopPlayingAny() error {
-	m.Lock()
-	defer m.Unlock()
-
 	if m.connection == nil || !m.IsConnected {
 		m.debug("[StopPlayingAny] websocket is not connected")
 		return errors.New("websocket is not connected")
@@ -616,16 +616,94 @@ func (m *BHapticsManager) RegisterPatternFromFile(key, tactFilePath string) erro
 		return err
 	}
 
-	var tact register
-	err = json.Unmarshal(f, &tact)
+	var reg register
+	err = sonic.Unmarshal(f, &reg)
 	if err != nil {
 		m.debug("[RegisterPatternFromFile] failed to unmarshal tact file: ", err)
 		return err
 	}
 
-	// TODO - queue 등록 및 캐싱
+	err = m.registerRequestAdd([]register{reg})
+	if err != nil {
+		m.debug("[registerPatternFromFile] failed to enqueue register: ", err)
+		return err
+	}
 
 	return nil
+}
+
+func (m *BHapticsManager) RegisterPatternFromJSON(key string, tactJsonData string) error {
+	if key == "" {
+		m.debug("[RegisterPatternFromJSON] key is empty")
+		return errors.New("key is empty")
+	}
+
+	if tactJsonData == "" {
+		m.debug("[RegisterPatternFromJSON] tact JSON data is empty")
+		return errors.New("tact JSON data is empty")
+	}
+
+	var reg register
+	err := sonic.Unmarshal([]byte(tactJsonData), &reg)
+	if err != nil {
+		m.debug("[RegisterPatternFromJSON] failed to unmarshal tact JSON data: ", err)
+		return err
+	}
+
+	err = m.registerRequestAdd([]register{reg})
+	if err != nil {
+		m.debug("[RegisterPatternFromJSON] failed to enqueue register: ", err)
+		return err
+	}
+
+	return nil
+}
+
+func (m *BHapticsManager) registerRequestAdd(register []register) error {
+	if m.connection == nil || !m.IsConnected {
+		m.debug("[registerRequestAdd] websocket is not connected")
+		return errors.New("websocket is not connected")
+	}
+
+	req := registerRequest{
+		Register: register,
+	}
+
+	msg, err := sonic.Marshal(req)
+	if err != nil {
+		m.debug("[registerRequestAdd] failed to marshal JSON: ", err)
+		return err
+	}
+
+	err = m.eventQueue.Enqueue(msg)
+	if err != nil {
+		m.debug("[registerRequestAdd] failed to enqueue event: ", err)
+		return err
+	}
+
+	return nil
+}
+
+func (m *BHapticsManager) registerSend() error {
+	defer func() {
+		m.debug("[register] websocket connection closed")
+		m.disconnect()
+	}()
+
+	for {
+		if m.registerQueue.GetLen() > 0 {
+			m.debug("[register] register dequeued")
+			item, err := m.registerQueue.Dequeue()
+			if err != nil {
+				m.debug("[register] failed to dequeue register item: ", err)
+			} else {
+				m.debug("[register] sending register request")
+				m.connection.write <- item.([]byte)
+			}
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 func (m *BHapticsManager) cachingPattern(key string, events []event) error {
