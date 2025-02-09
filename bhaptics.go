@@ -168,7 +168,7 @@ func (m *BHapticsManager) reader() {
 
 		_, message, err := m.connection.socket.ReadMessage()
 		if err != nil {
-			m.connection.read <- message
+			m.connection.read <- []byte(fmt.Sprintf("error : %s", err.Error()))
 			continue
 		}
 
@@ -579,6 +579,8 @@ func (m *BHapticsManager) IsPatternRegistered(key string) (bool, error) {
 func (m *BHapticsManager) PlayDot(key string, durationMillis int, dotPoints []HapticPoint, position bHapticsPosition) {
 }
 
+// PlayPattern 메서드는 bHaptics API에 등록된
+// key에 해당하는 이벤트를 Queue에 등록한다
 func (m *BHapticsManager) PlayPattern(key string, altKey ...string) error {
 	if key == "" {
 		m.debug("[PlayPattern] key is empty")
@@ -599,6 +601,8 @@ func (m *BHapticsManager) PlayPattern(key string, altKey ...string) error {
 	return nil
 }
 
+// RegisterPatternFromFile 메서드는 tact 파일을
+// bHaptics API에 key로 등록한다
 func (m *BHapticsManager) RegisterPatternFromFile(key, tactFilePath string) error {
 	if key == "" {
 		m.debug("[RegisterPatternFromFile] key is empty")
@@ -632,6 +636,8 @@ func (m *BHapticsManager) RegisterPatternFromFile(key, tactFilePath string) erro
 	return nil
 }
 
+// RegisterPatternFromJSON 메서드는 tact json 데이터를
+// bHaptics API에 key로 등록한다
 func (m *BHapticsManager) RegisterPatternFromJSON(key string, tactJsonData string) error {
 	if key == "" {
 		m.debug("[RegisterPatternFromJSON] key is empty")
@@ -659,6 +665,7 @@ func (m *BHapticsManager) RegisterPatternFromJSON(key string, tactJsonData strin
 	return nil
 }
 
+// registerRequestAdd 메서드는 Queue에 패턴을 등록한다
 func (m *BHapticsManager) registerRequestAdd(register []register) error {
 	if m.connection == nil || !m.IsConnected {
 		m.debug("[registerRequestAdd] websocket is not connected")
@@ -684,6 +691,8 @@ func (m *BHapticsManager) registerRequestAdd(register []register) error {
 	return nil
 }
 
+// registerSend 메서드는 계속 대기하면서
+// Queue에 등록된 패턴이 있다면 bHaptics API로 전달한다
 func (m *BHapticsManager) registerSend() error {
 	defer func() {
 		m.debug("[register] websocket connection closed")
