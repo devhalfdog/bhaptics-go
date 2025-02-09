@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 
 	bhapticsgo "github.com/devhalfdog/bhaptics-go"
 )
@@ -22,6 +23,6 @@ func main() {
 
 	err := manager.Run()
 	if err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 }

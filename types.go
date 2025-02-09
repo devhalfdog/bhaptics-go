@@ -10,6 +10,8 @@ import (
 const (
 	endpoint       = "v2/feedbacks%s"
 	bHapticsApiUrl = "ws://%s:%d/%s"
+
+	maxIntensity int = 500
 )
 
 // BHaptics Positions
