@@ -25,19 +25,21 @@ import (
 func NewBHapticsManager(opt ...Option) *BHapticsManager {
 	manager := &BHapticsManager{
 		connection: &bHapticsConnection{
-			ipAddress: "localhost",
-			port:      15881,
-			socket:    nil,
-			timeout:   3,
-			write:     make(chan []byte, 1024),
-			read:      make(chan []byte, 1024),
+			ipAddress:    "localhost",
+			port:         15881,
+			socket:       nil,
+			timeout:      3,
+			write:        make(chan []byte, 1024),
+			read:         make(chan []byte, 1024),
+			lastResponse: playerResponse{},
 		},
-		eventQueue:  goconcurrentqueue.NewFIFO(),
-		eventCache:  make(map[string][]event),
-		IsConnected: false,
-		appKey:      "",
-		appName:     "",
-		debugMode:   true,
+		eventQueue:    goconcurrentqueue.NewFIFO(),
+		registerQueue: goconcurrentqueue.NewFIFO(),
+		eventCache:    make(map[string][]event),
+		IsConnected:   false,
+		appKey:        "",
+		appName:       "",
+		debugMode:     true,
 	}
 
 	if len(opt) > 0 {
@@ -185,7 +187,6 @@ func (m *BHapticsManager) parser() {
 	}()
 
 	for message := range m.connection.read {
-		//! TODO: error handling
 		if strings.Split(string(message), " ")[0] == "error" {
 			m.debug("[parser] error message from BHaptics API: ", string(message))
 			continue
