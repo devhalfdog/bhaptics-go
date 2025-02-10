@@ -30,12 +30,15 @@ func main() {
 
 	err := manager.Run()
 	if err != nil {
-		log.Fatalln(err)
+		log.Println(err)
 	}
 
 	log.Println("bHaptics Connect")
 	log.Println("aA - Get Connected Device Count")
 	log.Println("sS - Is (Vest)Device Connected")
+	log.Println("dD - Dot Haptic")
+	log.Println("fF - Path Haptic")
+	log.Println("qQ - Play Pattern from file(example.tact)")
 
 	go func() {
 		for {
@@ -50,16 +53,77 @@ func main() {
 				} else {
 					log.Println("Connected Device Count:", count)
 				}
-			case "s":
+			case "s": // IsDeviceConnected
 				isConnected, err := manager.IsDeviceConnected(bhapticsgo.VestFrontPosition)
 				if err != nil {
 					log.Println(err)
 				} else {
 					log.Println("Is Vest Device Connected:", isConnected)
 				}
-			case "q":
-			case "d":
-			case "f":
+			case "d": // Dot Haptic
+				haptic := []bhapticsgo.HapticPoint{
+					{
+						Index:     0,
+						Intensity: 100,
+					},
+					{
+						Index:     1,
+						Intensity: 100,
+					},
+				}
+				err := manager.Play("Vest", bhapticsgo.PlayOption{
+					Position:       bhapticsgo.VestPosition,
+					DurationMillis: 1000,
+					DotPoints:      haptic,
+				})
+				if err != nil {
+					log.Println(err)
+				} else {
+					log.Println("Play Dot Haptic")
+				}
+			case "f": // Path Haptic
+				haptic := []bhapticsgo.HapticPoint{
+					{
+						X:         0.1,
+						Y:         0.1,
+						Intensity: 100,
+					},
+					{
+						X:         0.1,
+						Y:         0.2,
+						Intensity: 100,
+					},
+					{
+						X:         0.1,
+						Y:         0.3,
+						Intensity: 100,
+					},
+				}
+				err := manager.Play("Vest", bhapticsgo.PlayOption{
+					Position:       bhapticsgo.VestPosition,
+					DurationMillis: 1000,
+					PathPoints:     haptic,
+				})
+				if err != nil {
+					log.Println(err)
+				} else {
+					log.Println("Play Path Haptic")
+				}
+			case "q": // Play Pattern(example.tact)
+				err := manager.RegisterPatternFromFile("example", "./example.tact")
+				if err != nil {
+					log.Println(err)
+				} else {
+					log.Println("Register Pattern from file(example.tact)")
+
+					err = manager.PlayPattern("example", "alternate")
+					if err != nil {
+						log.Println(err)
+					} else {
+						log.Println("Play Pattern(example, alternate)")
+					}
+				}
+
 			}
 		}
 	}()
