@@ -112,20 +112,46 @@ func main() {
 					log.Println("Play Path Haptic")
 				}
 			case "q": // Play Pattern(example.tact)
-				err := manager.RegisterPatternFromFile("example", "./example.tact")
+				ok, err := manager.IsPatternRegistered("example")
 				if err != nil {
 					log.Println(err)
-				} else {
-					log.Println("Register Pattern from file(example.tact)")
+					continue
+				}
 
-					err = manager.PlayPattern("example", "alternate")
+				if !ok {
+					err := manager.RegisterPatternFromFile("example", "./example.tact")
 					if err != nil {
 						log.Println(err)
-					} else {
-						log.Println("Play Pattern(example, alternate)")
+						continue
 					}
 				}
+
+				log.Println("Register Pattern from file(example.tact)")
+
+				err = manager.PlayPattern("example", "alternate")
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+
+				log.Println("Play Pattern(example, alternate)")
 			case "w": // Queue Test1 (Pattern)
+				ok, err := manager.IsPatternRegistered("example")
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+
+				if !ok {
+					err := manager.RegisterPatternFromFile("example", "./example.tact")
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+				}
+
+				log.Println("Register Pattern from file(example.tact)")
+
 				go manager.PlayPattern("example", "k1")
 				go manager.PlayPattern("example", "k2")
 				go manager.PlayPattern("example", "k3")
@@ -133,6 +159,22 @@ func main() {
 
 				log.Println("Queue Test (Pattern)")
 			case "e": // Queue Test2 (Pattern)
+				ok, err := manager.IsPatternRegistered("example")
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+
+				if !ok {
+					err := manager.RegisterPatternFromFile("example", "./example.tact")
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+				}
+
+				log.Println("Register Pattern from file(example.tact)")
+
 				go manager.PlayPattern("example")
 				go manager.PlayPattern("example")
 				go manager.PlayPattern("example")
