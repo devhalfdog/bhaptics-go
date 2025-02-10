@@ -579,7 +579,7 @@ func (m *BHapticsManager) IsPatternRegistered(key string) (bool, error) {
 // TODO
 func (m *BHapticsManager) Play(key string, opt PlayOption) error {
 	if key == "" {
-		m.debug("[PlayDot] key is empty")
+		m.debug("[Play] key is empty")
 		return errors.New("key is empty")
 	}
 
@@ -590,7 +590,7 @@ func (m *BHapticsManager) Play(key string, opt PlayOption) error {
 			DotPoints:      opt.DotPoints,
 			PathPoints:     opt.PathPoints,
 		}); err != nil {
-			m.debug("[PlayDot] failed to play front: ", err)
+			m.debug("[Play] failed to play front: ", err)
 			return err
 		}
 
@@ -600,7 +600,7 @@ func (m *BHapticsManager) Play(key string, opt PlayOption) error {
 			DotPoints:      opt.DotPoints,
 			PathPoints:     opt.PathPoints,
 		}); err != nil {
-			m.debug("[PlayDot] failed to play back: ", err)
+			m.debug("[Play] failed to play back: ", err)
 			return err
 		}
 
@@ -626,7 +626,7 @@ func (m *BHapticsManager) Play(key string, opt PlayOption) error {
 
 	err := m.eventRequestsAdd([]event{evt})
 	if err != nil {
-		m.debug("[PlayDot] failed to enqueue event: ", err)
+		m.debug("[Play] failed to enqueue event: ", err)
 		return err
 	}
 
