@@ -39,6 +39,8 @@ func main() {
 	log.Println("dD - Dot Haptic")
 	log.Println("fF - Path Haptic")
 	log.Println("qQ - Play Pattern from file(example.tact)")
+	log.Println("wW - Queue Test1 (Pattern)")
+	log.Println("eE - Queue Test2 (Pattern)")
 
 	go func() {
 		for {
@@ -123,7 +125,20 @@ func main() {
 						log.Println("Play Pattern(example, alternate)")
 					}
 				}
+			case "w": // Queue Test1 (Pattern)
+				go manager.PlayPattern("example", "k1")
+				go manager.PlayPattern("example", "k2")
+				go manager.PlayPattern("example", "k3")
+				go manager.PlayPattern("example", "k4")
 
+				log.Println("Queue Test (Pattern)")
+			case "e": // Queue Test2 (Pattern)
+				go manager.PlayPattern("example")
+				go manager.PlayPattern("example")
+				go manager.PlayPattern("example")
+				go manager.PlayPattern("example")
+
+				log.Println("Queue Test2 (Pattern)")
 			}
 		}
 	}()
