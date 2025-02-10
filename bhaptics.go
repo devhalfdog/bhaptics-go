@@ -642,10 +642,10 @@ func (m *BHapticsManager) PlayPattern(key string, altKey ...string) error {
 	}
 
 	// TODO - eventCache 언제 씀?
-	if m.eventCache[key] == nil {
-		m.debug("[PlayPattern] pattern not found in cache")
-		return errors.New("pattern not found in cache")
-	}
+	// if m.eventCache[key] == nil {
+	// 	m.debug("[PlayPattern] pattern not found in cache")
+	// 	return errors.New("pattern not found in cache")
+	// }
 
 	err := m.eventKeyAdd(key, altKey...)
 	if err != nil {
