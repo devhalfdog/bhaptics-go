@@ -7,7 +7,9 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
+	"github.com/avast/retry-go/v4"
 	bhapticsgo "github.com/devhalfdog/bhaptics-go"
 )
 
@@ -28,7 +30,18 @@ func main() {
 		DebugMode: true,
 	})
 
-	err := manager.Run()
+	configs := []retry.Option{
+		retry.OnRetry(func(attempt uint, err error) {
+			log.Printf("Retry bHaptics connect Attempt %d: %s\n", attempt, err)
+		}),
+		retry.MaxDelay(10 * time.Second),
+	}
+
+	err := retry.Do(func() error {
+		err := manager.Run()
+		return err
+	}, configs...)
+
 	if err != nil {
 		log.Println(err)
 	}

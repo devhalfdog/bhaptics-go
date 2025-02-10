@@ -790,6 +790,7 @@ func (m *BHapticsManager) cachingPattern(key string, events []event) error {
 // debug 메서드는 debugMode가 true일 때, message를 로그로 출력한다
 func (m *BHapticsManager) debug(message ...any) {
 	if m.debugMode {
-		log.Println(message...)
+		log.Println(fmt.Sprintf("*DEBUG: %v", fmt.Sprint(message...)))
+		// log.Println(message...)
 	}
 }
