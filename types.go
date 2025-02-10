@@ -121,3 +121,10 @@ type HapticPoint struct {
 	Y         float64     `json:"y,omitempty"`
 	Intensity interface{} `json:"intensity,omitempty"`
 }
+
+type PlayOption struct {
+	Position       bHapticsPosition
+	DurationMillis int
+	DotPoints      []HapticPoint
+	PathPoints     []HapticPoint
+}

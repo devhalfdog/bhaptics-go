@@ -575,8 +575,62 @@ func (m *BHapticsManager) IsPatternRegistered(key string) (bool, error) {
 	return false, errors.New("[IsPatternRegistered] key not found")
 }
 
+// Play 메서드는 Dot, Path 이벤트를 실행한다
 // TODO
-func (m *BHapticsManager) PlayDot(key string, durationMillis int, dotPoints []HapticPoint, position bHapticsPosition) {
+func (m *BHapticsManager) Play(key string, opt PlayOption) error {
+	if key == "" {
+		m.debug("[PlayDot] key is empty")
+		return errors.New("key is empty")
+	}
+
+	if opt.Position == VestPosition {
+		if err := m.Play(fmt.Sprintf("%sFront", key), PlayOption{
+			Position:       VestFrontPosition,
+			DurationMillis: opt.DurationMillis,
+			DotPoints:      opt.DotPoints,
+			PathPoints:     opt.PathPoints,
+		}); err != nil {
+			m.debug("[PlayDot] failed to play front: ", err)
+			return err
+		}
+
+		if err := m.Play(fmt.Sprintf("%sBack", key), PlayOption{
+			Position:       VestBackPosition,
+			DurationMillis: opt.DurationMillis,
+			DotPoints:      opt.DotPoints,
+			PathPoints:     opt.PathPoints,
+		}); err != nil {
+			m.debug("[PlayDot] failed to play back: ", err)
+			return err
+		}
+
+		return nil
+	}
+
+	evt := event{
+		Key:  key,
+		Type: "frame",
+		Frame: framePayload{
+			Position:       opt.Position,
+			DurationMillis: opt.DurationMillis,
+		},
+	}
+
+	if opt.DotPoints != nil && len(opt.DotPoints) > 0 {
+		evt.Frame.DotPoints = opt.DotPoints
+	}
+
+	if opt.PathPoints != nil && len(opt.PathPoints) > 0 {
+		evt.Frame.PathPoints = opt.PathPoints
+	}
+
+	err := m.eventRequestsAdd([]event{evt})
+	if err != nil {
+		m.debug("[PlayDot] failed to enqueue event: ", err)
+		return err
+	}
+
+	return nil
 }
 
 // PlayPattern 메서드는 bHaptics API에 등록된
@@ -587,6 +641,7 @@ func (m *BHapticsManager) PlayPattern(key string, altKey ...string) error {
 		return errors.New("key is empty")
 	}
 
+	// TODO - eventCache 언제 씀?
 	if m.eventCache[key] == nil {
 		m.debug("[PlayPattern] pattern not found in cache")
 		return errors.New("pattern not found in cache")
