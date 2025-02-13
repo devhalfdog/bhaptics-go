@@ -91,7 +91,7 @@ func (m *BHapticsManager) connect() error {
 		return fmt.Errorf("already connected")
 	}
 
-	var ep string
+	var ep string = fmt.Sprintf(endpoint, "")
 	if m.appKey != "" && m.appName != "" {
 		ep = fmt.Sprintf(endpoint, fmt.Sprintf("?appKey=%s&appName=%s", m.appKey, m.appName))
 	}
@@ -175,6 +175,7 @@ func (m *BHapticsManager) reader() {
 		}
 
 		m.connection.read <- message
+		m.debug("[reader]", string(message))
 	}
 }
 
@@ -314,6 +315,7 @@ func (m *BHapticsManager) eventSend() error {
 				} else {
 					m.debug("[send] send event")
 					m.connection.write <- item.([]byte)
+					m.debug("[send] ", string(item.([]byte)))
 				}
 			}
 		} else {
@@ -573,7 +575,7 @@ func (m *BHapticsManager) IsPatternRegistered(key string) (bool, error) {
 	}
 
 	m.debug("[IsPatternRegistered] key not found")
-	return false, errors.New("[IsPatternRegistered] key not found")
+	return false, nil
 }
 
 // Play 메서드는 Dot, Path 이벤트를 실행한다
@@ -764,6 +766,7 @@ func (m *BHapticsManager) registerSend() error {
 			} else {
 				m.debug("[register] sending register request")
 				m.connection.write <- item.([]byte)
+				m.debug("[register] ", string(item.([]byte)))
 			}
 		}
 
